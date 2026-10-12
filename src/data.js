@@ -50,7 +50,7 @@ export const ARCHIVE_EVENTS = [
   { date:'2018, AUGUST 17',  title:'Kodagu Cascading Slides',          desc:'Kerala floods triggered simultaneous slides across Kodagu and Idukki.' },
 ];
 
-export const API_BASE = "http://localhost:8000";
+export const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export const fetchLiveDistricts = async () => {
   const r = await fetch(`${API_BASE}/all-districts`);
