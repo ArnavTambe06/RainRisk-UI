@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { DISTRICTS, fetchLiveDistricts } from "../data";
+import { DISTRICTS, fetchLiveDistricts, API_BASE } from "../data";
 
-const REFRESH_INTERVAL = 60 * 60 * 1000;  // 1 hour
-const POLL_INTERVAL    = 30 * 1000;        // poll every 30s until live
+const REFRESH_INTERVAL = 60 * 60 * 1000;
+const POLL_INTERVAL    = 30 * 1000;
+const RETRY_INTERVAL   = 10 * 1000;  // retry every 10s on error
 
 export default function useLiveDistricts() {
   const [districts,   setDistricts]   = useState(DISTRICTS);
@@ -15,14 +16,26 @@ export default function useLiveDistricts() {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await fetchLiveDistricts();
+      // First wake up the server
+      const healthRes = await fetch(`${API_BASE}/health`, { 
+        signal: AbortSignal.timeout(15000) 
+      });
+      if (!healthRes.ok) throw new Error("Server not ready");
 
+      // Check cache
+      const cacheRes  = await fetch(`${API_BASE}/cache-status`);
+      const cacheInfo = await cacheRes.json();
+
+      if (!cacheInfo.ready) {
+        setStatus("loading");
+        setError(null);
+        return;
+      }
+
+      // Fetch live data
+      const data = await fetchLiveDistricts();
       if (data.districts && data.districts.length > 0) {
-        const merged = data.districts.map(d => ({
-          ...d,
-          score: d.risk_score,
-        }));
-        setDistricts(merged);
+        setDistricts(data.districts.map(d => ({ ...d, score: d.risk_score })));
         setLastUpdated(new Date());
         setObsDate(data.districts[0]?.obs_date || null);
         setLagDays(data.districts[0]?.data_lag_days ?? null);
@@ -30,25 +43,21 @@ export default function useLiveDistricts() {
         setIsLive(true);
         setError(null);
       }
-    } catch {
-      setError("API unreachable — showing static data");
-      setStatus("error");
+    } catch (e) {
+      setError("API waking up — retrying...");
+      setStatus("loading");  // show loading not error while Render wakes up
     }
   }, []);
 
   useEffect(() => {
-    // Poll every 30 seconds until we get live data
+    refresh();
+    // Keep polling until live
     const poll = setInterval(() => {
       if (!isLive) refresh();
     }, POLL_INTERVAL);
-
-    // Initial fetch
-    refresh();
-
     return () => clearInterval(poll);
   }, [refresh, isLive]);
 
-  // Once live, refresh every hour
   useEffect(() => {
     if (!isLive) return;
     const timer = setInterval(refresh, REFRESH_INTERVAL);
